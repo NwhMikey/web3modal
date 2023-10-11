@@ -2,7 +2,7 @@
   "configurations": [
     {
       "name": "Docker Node.js Launch",
-      "nodeVersionHint": "docker",
+      "type": "docker",
       "request": "launch",
       "preLaunchTask": "docker-run: debug",
       "platform": "node"
