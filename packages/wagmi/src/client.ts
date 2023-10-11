@@ -33,17 +33,14 @@ import {
   NAMESPACE,
   VERSION,
   WALLET_CHOICE_KEY,
-  WALLET_CONNECT_CONNECTOR_ID
-} from './utils/constants.js'
-import { caipNetworkIdToNumber, getCaipDefaultChain, getCaipTokens } from './utils/helpers.js'
-import {
+  WALLET_CONNECT_CONNECTOR_ID,
   ConnectorExplorerIds,
   ConnectorImageIds,
   ConnectorNamesMap,
   ConnectorTypesMap,
   NetworkImageIds
-} from './utils/presets.js'
-
+} from '@web3modal/utils'
+import { caipNetworkIdToNumber, getWagmiCaipDefaultChain, getCaipTokens } from '@web3modal/utils'
 // -- Types ---------------------------------------------------------------------
 export interface Web3ModalClientOptions extends Omit<LibraryOptions, 'defaultChain' | 'tokens'> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -166,16 +163,30 @@ export class Web3Modal extends Web3ModalScaffold {
         await connect({ connector, chainId })
       },
 
-      checkInjectedInstalled(ids) {
-        if (!window?.ethereum) {
-          return false
-        }
+      checkInstalled: ids => {
+        const eip6963Connectors = this.getConnectors().filter(c => c.type === 'ANNOUNCED')
+        const injectedConnector = this.getConnectors().find(c => c.type === 'INJECTED')
 
         if (!ids) {
           return Boolean(window.ethereum)
         }
 
-        return ids.some(id => Boolean(window.ethereum?.[String(id)]))
+        if (eip6963Connectors.length) {
+          const installed = ids.some(id => eip6963Connectors.some(c => c.info?.rdns === id))
+          if (installed) {
+            return true
+          }
+        }
+
+        if (injectedConnector) {
+          if (!window?.ethereum) {
+            return false
+          }
+
+          return ids.some(id => Boolean(window.ethereum?.[String(id)]))
+        }
+
+        return false
       },
 
       disconnect
@@ -184,7 +195,7 @@ export class Web3Modal extends Web3ModalScaffold {
     super({
       networkControllerClient,
       connectionControllerClient,
-      defaultChain: getCaipDefaultChain(defaultChain),
+      defaultChain: getWagmiCaipDefaultChain(defaultChain),
       tokens: getCaipTokens(tokens),
       _sdkVersion: _sdkVersion ?? `html-wagmi-${VERSION}`,
       ...w3mOptions
@@ -194,8 +205,8 @@ export class Web3Modal extends Web3ModalScaffold {
 
     this.syncRequestedNetworks(chains)
 
-    this.syncConnectors(wagmiConfig.connectors)
-    this.listenConnectors(wagmiConfig.connectors)
+    this.syncConnectors(wagmiConfig)
+    this.listenConnectors(wagmiConfig)
 
     watchAccount(() => this.syncAccount())
     watchNetwork(() => this.syncNetwork())
@@ -315,9 +326,9 @@ export class Web3Modal extends Web3ModalScaffold {
     this.setBalance(balance.formatted, balance.symbol)
   }
 
-  private syncConnectors(connectors: Web3ModalClientOptions['wagmiConfig']['connectors']) {
+  private syncConnectors(wagmiConfig: Web3ModalClientOptions['wagmiConfig']) {
     const w3mConnectors: Connector[] = []
-    connectors.forEach(({ id, name }) => {
+    wagmiConfig.connectors.forEach(({ id, name }) => {
       if (id !== EIP6963_CONNECTOR_ID) {
         w3mConnectors.push({
           id,
@@ -332,15 +343,18 @@ export class Web3Modal extends Web3ModalScaffold {
     this.setConnectors(w3mConnectors)
   }
 
-  private listenConnectors(connectors: Web3ModalClientOptions['wagmiConfig']['connectors']) {
-    const connector = connectors.find(c => c.id === EIP6963_CONNECTOR_ID) as EIP6963Connector
+  private listenConnectors(wagmiConfig: Web3ModalClientOptions['wagmiConfig']) {
+    const connector = wagmiConfig.connectors.find(
+      c => c.id === EIP6963_CONNECTOR_ID
+    ) as EIP6963Connector
+
     if (typeof window !== 'undefined' && connector) {
       window.addEventListener(EIP6963_ANNOUNCE_EVENT, (event: CustomEventInit<Wallet>) => {
         if (event.detail) {
           const { info, provider } = event.detail
           this.addConnector({
             id: EIP6963_CONNECTOR_ID,
-            type: 'EIP6963',
+            type: 'ANNOUNCED',
             imageUrl: info.icon ?? this.options?.connectorImages?.[EIP6963_CONNECTOR_ID],
             name: info.name,
             provider,
